@@ -15,10 +15,15 @@ import sqlite3
 
 from .tiers import TIERS
 
+# CAL-CONF-01: stated confidence more than 5 points above actual accuracy
+# means the decider is overconfident, even if accuracy still clears the bar.
+OVERCONFIDENCE_TOLERANCE = 0.05
+
 
 def reliability_table(con: sqlite3.Connection) -> list[dict]:
     """One row per tier: n, mean stated confidence, actual accuracy, the
-    tier's bar, the gap, and whether the tier is miscalibrated."""
+    tier's bar, the gap, whether the tier is below its bar (miscalibrated),
+    and whether stated confidence overstates accuracy (overconfident)."""
     rows = []
     for tier in TIERS:
         recs = con.execute(
@@ -38,6 +43,8 @@ def reliability_table(con: sqlite3.Connection) -> list[dict]:
                 "accuracy_bar": tier.accuracy_bar,
                 "gap": round(gap, 3),
                 "miscalibrated": bool(n and accuracy < tier.accuracy_bar),
+                "confidence_gap": round(mean_conf - accuracy, 3),
+                "overconfident": bool(n and mean_conf - accuracy > OVERCONFIDENCE_TOLERANCE),
             }
         )
     return rows

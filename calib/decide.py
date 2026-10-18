@@ -4,7 +4,8 @@ The engine never guesses. If the model's confidence does not clear the
 accuracy bar of the tier the claim belongs to, the claim is recorded as
 escalated and :class:`Escalated` is raised so the caller is forced to
 handle it. HIGH_STAKES claims are never auto-decided: they are recorded
-as ``pending_human`` until a person completes them via :func:`human_decide`.
+as ``pending_human`` until a person completes them via :func:`human_decide`,
+which also resolves escalated claims. A claim is decided at most once.
 """
 
 from __future__ import annotations
@@ -63,6 +64,16 @@ def decide(
     claim = con.execute("SELECT * FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()
     if claim is None:
         raise DecisionError(f"unknown claim {claim_id}")
+    prior = con.execute(
+        "SELECT decision_id, outcome FROM decisions WHERE claim_id = ? ORDER BY decision_id",
+        (claim_id,),
+    ).fetchone()
+    if prior is not None:
+        # One decision per claim (DEC-ONCE-01): a second call must not create a
+        # second payout. Escalated claims go to a human via human_decide().
+        raise DecisionError(
+            f"claim {claim_id} already has decision {prior['decision_id']} ({prior['outcome']})"
+        )
 
     tier, via_fraud = tier_for_amount(claim["amount"], bool(claim["fraud_flag"]))
     rule_id = FRAUD_RULE_ID if via_fraud else tier.rule_id
@@ -72,18 +83,19 @@ def decide(
 
     if confidence < tier.accuracy_bar:
         con.execute(
-            "INSERT INTO decisions VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO decisions VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (decision_id, claim_id, tier.name, rule_id, confidence, proposed,
-             "escalated", evidence_cited, decided_by, ts),
+             "escalated", evidence_cited, decided_by, ts, None),
         )
         con.commit()
         raise Escalated(decision_id)
 
     outcome = "pending_human" if tier.mode == "human_decides" else "decided"
     con.execute(
-        "INSERT INTO decisions VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO decisions VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (decision_id, claim_id, tier.name, rule_id, confidence, proposed,
-         outcome, evidence_cited, decided_by, ts),
+         outcome, evidence_cited, decided_by, ts,
+         proposed if outcome == "decided" else None),
     )
     con.commit()
     return get_decision(con, decision_id)
@@ -92,16 +104,21 @@ def decide(
 def human_decide(
     con: sqlite3.Connection, decision_id: str, human_decision: str, reviewer: str
 ) -> dict:
-    """Complete a ``pending_human`` decision. Returns the updated record."""
+    """Complete a ``pending_human`` or ``escalated`` decision.
+
+    The model's ``proposed`` value is kept; the human's call is stored in
+    ``final_decision`` so the audit shows whether the human agreed (DEC-HUMAN-01).
+    """
     if human_decision not in ("approve", "deny"):
         raise DecisionError(f"human_decision must be approve/deny, got {human_decision!r}")
     rec = get_decision(con, decision_id)
     if rec is None:
         raise DecisionError(f"unknown decision {decision_id}")
-    if rec["outcome"] != "pending_human":
-        raise DecisionError(f"decision {decision_id} is {rec['outcome']}, not pending_human")
+    if rec["outcome"] not in ("pending_human", "escalated"):
+        raise DecisionError(
+            f"decision {decision_id} is {rec['outcome']}, not pending_human or escalated")
     con.execute(
-        "UPDATE decisions SET outcome = ?, proposed = ?, decided_by = ? WHERE decision_id = ?",
+        "UPDATE decisions SET outcome = ?, final_decision = ?, decided_by = ? WHERE decision_id = ?",
         ("decided", human_decision, f"human:{reviewer}", decision_id),
     )
     con.commit()

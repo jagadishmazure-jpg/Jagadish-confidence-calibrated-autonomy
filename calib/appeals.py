@@ -2,7 +2,7 @@
 
 An appeal triggers exactly one extra evidence-gathering round (a supplemental
 review document is attached to the claim), then the claim is re-decided from
-the augmented evidence. The appeal outcome — ``upheld`` or ``overturned`` —
+the augmented evidence: the net stance of every document on the claim. The appeal outcome — ``upheld`` or ``overturned`` —
 is recorded next to the original decision, and per-tier appeal rates show
 where the accuracy bars are set wrong.
 
@@ -18,7 +18,7 @@ import datetime as _dt
 import hashlib
 import sqlite3
 
-from .decide import DecisionError, get_decision
+from .decide import get_decision
 
 
 class AppealError(Exception):
@@ -31,10 +31,6 @@ def _appeal_stance(claim_id: str, decision_id: str) -> int:
     reproducible without randomness."""
     digest = hashlib.md5(f"{claim_id}:{decision_id}".encode()).hexdigest()
     return 1 if int(digest, 16) % 2 == 0 else -1
-
-
-def _lean(decision: str) -> int:
-    return 1 if decision == "approve" else -1
 
 
 def appeal(
@@ -69,7 +65,13 @@ def appeal(
         (new_eid, rec["claim_id"], "supplemental review",
          f"appeal evidence for {decision_id} filed by {appellant}", stance),
     )
-    outcome = "overturned" if stance * _lean(rec["proposed"]) < 0 else "upheld"
+    # Re-decide from ALL the evidence, now including the supplemental document
+    # (APPEAL-REDECIDE-01). The old rule looked only at the new document's
+    # stance, so an appeal was a coin flip that ignored the claim file.
+    net = sum(r[0] for r in cur.execute(
+        "SELECT supports FROM evidence WHERE claim_id = ?", (rec["claim_id"],)))
+    redecided = "approve" if net >= 0 else "deny"
+    outcome = "overturned" if redecided != rec["final_decision"] else "upheld"
     ts = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
     cur.execute(
         "INSERT INTO appeals VALUES (?,?,?,?,?,?,?)",
