@@ -1,0 +1,14 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jagadish-confidence-calibrated-autonomy"
+version = "0.1.0"
+description = "Accuracy-tiered decision autonomy with appeal paths (synthetic demo)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["calib"]
