@@ -108,7 +108,8 @@ def test_human_decide_completes(con):
     row = con.execute("SELECT claim_id FROM claims WHERE amount > 10000 LIMIT 1").fetchone()
     rec = decide.decide(con, row[0], "approve", 0.999)
     done = decide.human_decide(con, rec["decision_id"], "deny", "R. Osei")
-    assert done["outcome"] == "decided" and done["proposed"] == "deny"
+    assert done["outcome"] == "decided" and done["final_decision"] == "deny"
+    assert done["proposed"] == rec["proposed"]  # model's proposal kept for audit
     assert done["decided_by"] == "human:R. Osei"
 
 
@@ -304,3 +305,54 @@ def test_format_summary_mentions_calibration():
     from calib import demo_helpers
     text = demo_helpers.format_summary(demo_helpers.run_scenario())
     assert "FAST_PATH" in text and "MISCALIBRATED" in text
+
+
+# ---------- review fixes (grokbot-portfolio, 2026-10-18) ----------
+@pytest.mark.parametrize("amount,tier", [
+    (499.99, "FAST_PATH"), (499.995, "FAST_PATH"), (500.0, "STANDARD"),
+    (10000.0, "STANDARD"), (10000.005, "HIGH_STAKES"), (10000.01, "HIGH_STAKES"),
+])
+def test_tier_bands_have_no_gaps(amount, tier):
+    assert tier_for_amount(amount, False)[0].name == tier
+
+
+def _claim(con, tier_name):
+    lo, hi = {"FAST_PATH": (0, 500), "STANDARD": (500, 10000), "HIGH_STAKES": (10000.01, 1e9)}[tier_name]
+    return con.execute(
+        "SELECT claim_id FROM claims WHERE fraud_flag = 0 AND amount >= ? AND amount < ? ORDER BY claim_id",
+        (lo, hi)).fetchone()[0]
+
+
+def test_claim_cannot_be_decided_twice(con):
+    cid = _claim(con, "FAST_PATH")
+    decide.decide(con, cid, "approve", 0.95)
+    with pytest.raises(decide.DecisionError, match="already has decision"):
+        decide.decide(con, cid, "approve", 0.99)
+    assert con.execute("SELECT COUNT(*) FROM decisions WHERE claim_id = ?", (cid,)).fetchone()[0] == 1
+
+
+def test_escalated_claim_resolved_by_human(con):
+    cid = _claim(con, "STANDARD")
+    with pytest.raises(decide.Escalated) as exc:
+        decide.decide(con, cid, "approve", 0.50)
+    done = decide.human_decide(con, exc.value.decision_id, "deny", "R. Osei")
+    assert done["outcome"] == "decided" and done["final_decision"] == "deny"
+    assert done["proposed"] == "approve" and done["decided_by"] == "human:R. Osei"
+
+
+def test_appeal_redecides_from_all_evidence(con):
+    cid = _claim(con, "FAST_PATH")
+    con.execute("UPDATE evidence SET supports = 1 WHERE claim_id = ?", (cid,))  # file clearly supports
+    rec = decide.decide(con, cid, "deny", 0.95)
+    ap = appeals.appeal(con, rec["decision_id"], "claimant", "evidence supports me")
+    assert ap["outcome"] == "overturned"  # net stance >= +1 whatever the new document says
+    cid2 = _claim(con, "STANDARD")
+    con.execute("UPDATE evidence SET supports = 1 WHERE claim_id = ?", (cid2,))
+    rec2 = decide.decide(con, cid2, "approve", 0.97)
+    assert appeals.appeal(con, rec2["decision_id"], "auditor", "check")["outcome"] == "upheld"
+
+
+def test_overconfidence_flagged(con):
+    rows = {r["tier"]: r for r in calibration.reliability_table(con)}
+    assert rows["FAST_PATH"]["overconfident"] is True
+    assert rows["FAST_PATH"]["confidence_gap"] == round(rows["FAST_PATH"]["mean_confidence"] - rows["FAST_PATH"]["accuracy"], 3)

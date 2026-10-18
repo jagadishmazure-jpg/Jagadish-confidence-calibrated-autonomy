@@ -1,11 +1,11 @@
 # Domain notes: confidence-calibrated autonomy
 
-Distilled from recent industry literature on practical AI agents, in my own
-words. The core insight, via a published insurance claims-agent case study:
-**claims approval does not always require 100% accuracy.** Low-stakes claims
-can be auto-decided fast at a lower accuracy bar because payouts are
-adjustable and decisions are appealable internally — while high-stakes
-advice needs fiduciary-grade accuracy and human oversight.
+My own framing of a common design question for decision agents: **not every
+decision needs the same accuracy bar.** A low-value claim can be decided
+quickly at a lower bar, because a wrong payout is small, adjustable and
+appealable. A high-value or irreversible decision needs a much higher bar
+and a human in the loop. The repo makes that trade-off explicit, per
+decision type, instead of leaving one implicit bar for everything.
 
 ## The pattern
 

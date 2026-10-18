@@ -23,8 +23,8 @@ class Tier:
 
     name: str
     rule_id: str
-    min_amount: float  # inclusive lower bound of the claim-amount band
-    max_amount: float  # inclusive upper bound; float("inf") for open top
+    min_amount: float  # lower edge of the band (see tier_for_amount for edges)
+    max_amount: float  # upper edge; float("inf") for open top
     accuracy_bar: float  # model confidence must clear this to decide
     mode: str  # auto_decide | decide_with_spot_check | human_decides
     description: str
@@ -34,7 +34,7 @@ FAST_PATH = Tier(
     name="FAST_PATH",
     rule_id="ACC-FAST-01",
     min_amount=0.0,
-    max_amount=499.99,
+    max_amount=500.0,  # exclusive: amounts below 500
     accuracy_bar=0.90,
     mode="auto_decide",
     description=(
@@ -59,7 +59,7 @@ STANDARD = Tier(
 HIGH_STAKES = Tier(
     name="HIGH_STAKES",
     rule_id="ACC-HIGH-01",
-    min_amount=10000.01,
+    min_amount=10000.0,  # exclusive: any amount above 10,000
     max_amount=float("inf"),
     accuracy_bar=0.99,
     mode="human_decides",
@@ -85,7 +85,11 @@ def tier_for_amount(amount: float, fraud_flag: bool) -> tuple[Tier, bool]:
         raise ValueError(f"claim amount must be >= 0, got {amount}")
     if fraud_flag:
         return HIGH_STAKES, True
-    for tier in TIERS:
-        if tier.min_amount <= amount <= tier.max_amount:
-            return tier, False
-    raise ValueError(f"no tier covers amount {amount}")  # unreachable by construction
+    # Half-open bands with no gaps: [0, 500) FAST, [500, 10000] STANDARD,
+    # (10000, inf) HIGH. The old inclusive bands (..499.99 / 500.. / 10000.01..)
+    # left 499.995 and 10000.005 in no tier at all (ACC-BAND-01).
+    if amount < STANDARD.min_amount:
+        return FAST_PATH, False
+    if amount <= STANDARD.max_amount:
+        return STANDARD, False
+    return HIGH_STAKES, False

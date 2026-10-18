@@ -1,4 +1,4 @@
-"""Synthetic telemetry for Meridian Mutual (fictional insurer).
+"""Synthetic telemetry for Tornholt Mutual (fictional insurer).
 
 SQLite database with three tables:
 
@@ -50,7 +50,8 @@ CREATE TABLE decisions (
     outcome     TEXT NOT NULL,
     evidence_cited TEXT NOT NULL,
     decided_by  TEXT NOT NULL,
-    ts          TEXT NOT NULL
+    ts          TEXT NOT NULL,
+    final_decision TEXT
 );
 CREATE TABLE appeals (
     appeal_id   TEXT PRIMARY KEY,

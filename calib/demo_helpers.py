@@ -87,9 +87,11 @@ def format_summary(s: dict) -> str:
     ]
     for row in s["calibration"]:
         flag = " MISCALIBRATED" if row["miscalibrated"] else ""
+        if row["overconfident"]:
+            flag += " OVERCONFIDENT"
         lines.append(
-            f"  {row['tier']}: n={row['n']} accuracy={row['accuracy']} "
-            f"bar={row['accuracy_bar']} gap={row['gap']}{flag}"
+            f"  {row['tier']}: n={row['n']} confidence={row['mean_confidence']} "
+            f"accuracy={row['accuracy']} bar={row['accuracy_bar']} gap={row['gap']}{flag}"
         )
     lines.append(f"Audit chain valid: {s['audit_ok']} ({s['audit_entries']} entries)")
     return "\n".join(lines)

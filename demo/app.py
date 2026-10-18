@@ -15,7 +15,7 @@ def main() -> None:
     from calib.tiers import TIERS
 
     st.title("Confidence-Calibrated Autonomy")
-    st.caption("Meridian Mutual (fictional) — accuracy-tiered claim decisions with appeals")
+    st.caption("Tornholt Mutual (fictional) — accuracy-tiered claim decisions with appeals")
 
     st.subheader("Accuracy tiers")
     st.table(
